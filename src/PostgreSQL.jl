@@ -1,7 +1,11 @@
+#VERSION >= v"0.4" && __precompile__()
+
 module PostgreSQL
     export  Postgres,
             executemany,
-            escapeliteral
+            escapeliteral,
+            PostgresException,
+            PostgresQueryException
 
     using BinDeps
     @BinDeps.load_dependencies

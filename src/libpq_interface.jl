@@ -68,6 +68,7 @@ module libpq_interface
            PQftype,
            PQfname,
            PQgetlength,
+           PQgetResult,
            PQresStatus,
            PQresultStatus,
            PQresultErrorMessage,
@@ -75,7 +76,10 @@ module libpq_interface
            # misc
            PQescapeLiteral,
            PQescapeIdentifier,
-           PQfreemem
+           PQfreemem,
+           # copy
+           PQputCopyData,
+           PQputCopyEnd
 
     include("libpq_common.jl")
 
