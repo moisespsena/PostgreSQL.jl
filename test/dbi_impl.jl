@@ -2,10 +2,11 @@ import DataFrames: DataFrameRow
 import DataArrays: NA
 import Compat: @compat, parse
 
+
 function test_dbi()
     @test Postgres <: DBI.DatabaseSystem
 
-    conn = connect(Postgres, "localhost", "postgres", "", "julia_test")
+    conn = connect(Postgres, HOST, USER, PASSWORD, DB, PORT)
 
     @test isa(conn, DBI.DatabaseHandle)
     @test isdefined(conn, :status)
@@ -24,7 +25,7 @@ function test_dbi()
         @test typeof(row[3]) <: AbstractString
         @test row[4] == "foo       "
         @test typeof(row[4]) <: AbstractString
-        @test row[5] === None
+        @test row[5] === nothing
         push!(iterresults, row)
     end
 
@@ -35,7 +36,7 @@ function test_dbi()
     dfresults = fetchdf(result)
 
     dfrow = Any[x[2] for x in DataFrameRow(dfresults, 1)]
-    dfrow[5] = None
+    dfrow[5] = nothing
 
     @test dfrow == allresults[1]
 
@@ -57,9 +58,9 @@ function test_dbi()
     run(conn, create_str)
 
     data = Vector[
-        Any[1, 4, "Spam spam eggs and spam", "red", (UInt8)[0x01, 0x02, 0x03, 0x04], None, BigInt(123), parse(BigFloat, "123.4567")],
+        Any[1, 4, "Spam spam eggs and spam", "red", (UInt8)[0x01, 0x02, 0x03, 0x04], nothing, BigInt(123), parse(BigFloat, "123.4567")],
         Any[5, 8, "Michael Spam Palin", "blue", (UInt8)[], true, -3, parse(BigFloat, "-3.141592653")],
-        Any[3, 16, None, None, None, false, None, None],
+        Any[3, 16, nothing, nothing, nothing, false, nothing, nothing],
         Any[NA, 32, "Foo", "green", (UInt8)[0xfe, 0xdc, 0xba, 0x98, 0x76], true, 9876, parse(BigFloat, "9876.54321")]
     ]
 
@@ -80,7 +81,7 @@ function test_dbi()
     @test rows[1] == data[1]
     @test rows[2] == data[2]
     @test rows[3] == data[3]
-    @test rows[4][1] == None
+    @test rows[4][1] == nothing
     @test rows[4][2] == data[4][2]
     @test rows[4][3] == data[4][3]
     @test rows[4][4] == data[4][4]
@@ -93,7 +94,7 @@ function test_dbi()
 
     disconnect(conn)
 
-    conn = connect(Postgres, "localhost", "postgres", "", "julia_test")
+    conn = connect(Postgres, HOST, USER, PASSWORD, DB, PORT)
     run(conn, create_str)
     stmt = prepare(conn, insert_str)
     executemany(stmt, data)
@@ -107,7 +108,7 @@ function test_dbi()
     @test rows[1] == data[1]
     @test rows[2] == data[2]
     @test rows[3] == data[3]
-    @test rows[4][1] == None
+    @test rows[4][1] == nothing
     @test rows[4][2] == data[4][2]
     @test rows[4][3] == data[4][3]
     @test rows[4][4] == data[4][4]

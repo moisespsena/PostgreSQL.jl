@@ -6,17 +6,30 @@ function Base.connect(::Type{Postgres},
                       passwd::AbstractString="",
                       db::AbstractString="",
                       port::AbstractString="")
-    conn = PQsetdbLogin(host, port, C_NULL, C_NULL, db, user, passwd)
-    status = PQstatus(conn)
+    if contains(host, "://")
+        # with dsn
+        conn = PQconnectdb(host)
+        status = PQstatus(conn)
+        if status != CONNECTION_OK
+            errmsg = bytestring(PQerrorMessage(conn))
+            PQfinish(conn)
+            error(errmsg)
+        end
+        conn = PostgresDatabaseHandle(conn, status)
+        finalizer(conn, DBI.disconnect)
+        conn
+    else
+        conn = PQsetdbLogin(host, port, C_NULL, C_NULL, db, user, passwd)
+        status = PQstatus(conn)
 
-    if status != CONNECTION_OK
-        errmsg = bytestring(PQerrorMessage(conn))
-        PQfinish(conn)
-        error(errmsg)
+        if status != CONNECTION_OK
+            errmsg = bytestring(PQerrorMessage(conn))
+            PQfinish(conn)
+            error(errmsg)
+        end
+
+        PostgresDatabaseHandle(conn, status)
     end
-
-    conn = PostgresDatabaseHandle(conn, status)
-    return conn
 end
 
 function Base.connect(::Type{Postgres},
@@ -28,21 +41,6 @@ function Base.connect(::Type{Postgres},
     Base.connect(Postgres, host, user, passwd, db, string(port))
 end
 
-# Note that for some reason, `do conn` notation
-# doesn't work using this version of the function
-function Base.connect(::Type{Postgres};
-                      dsn::AbstractString="")
-    conn = PQconnectdb(dsn)
-    status = PQstatus(conn)
-    if status != CONNECTION_OK
-        errmsg = bytestring(PQerrorMessage(conn))
-        PQfinish(conn)
-        error(errmsg)
-    end
-    conn = PostgresDatabaseHandle(conn, status)
-    finalizer(conn, DBI.disconnect)
-    return conn
-end
 
 function DBI.disconnect(db::PostgresDatabaseHandle)
     if db.closed
@@ -102,32 +100,7 @@ function checkerrclear(result::Ptr{PGresult})
     PQclear(result)
 end
 
-escapeliteral(db::PostgresDatabaseHandle, value) = value
-escapeliteral(db::PostgresDatabaseHandle, value::AbstractString) = escapeliteral(db, bytestring(value))
 
-function escapeliteral(db::PostgresDatabaseHandle, value::Union{ASCIIString, UTF8String})
-    strptr = PQescapeLiteral(db.ptr, value, sizeof(value))
-    str = bytestring(strptr)
-    PQfreemem(strptr)
-    return str
-end
-
-function escape(val)
-  if val == nothing return "NULL"
-  elseif isa(val, Vector)
-    vals = map(escape, val)
-    return "ARRAY[" * join(vals, ", ") * "]"
-  elseif isa(val, Tuple)
-    vals = map(escape, val)
-    return "(" * join(vals, ", ") * ")"
-  elseif isa(val, AbstractString)
-      prefix = search(val, '\\') > 0 ? 'E' : ""
-      val = replace(val, '\'', "''")
-      val = replace(val, '\\', "\\\\")
-      return string(prefix, "'", val, "'")
-  end
-  string(val)
-end
 
 Base.run(db::PostgresDatabaseHandle, sql::AbstractString) = checkerrclear(PQexec(db.ptr, sql))
 
@@ -135,19 +108,25 @@ hashsql(sql::AbstractString) = bytestring(string("__", hash(sql), "__"))
 
 function getparamtypes(result::Ptr{PGresult})
     nparams = PQnparams(result)
-    return @compat [pgtype(OID{Int(PQparamtype(result, i-1))}) for i = 1:nparams]
+    return @compat [pgtype(oid(PQparamtype(result, i-1))) for i = 1:nparams]
 end
 
-LIBC = @windows ? "msvcrt.dll" : :libc
+const LIBC = @static is_windows() ? "msvcrt.dll" : :libc
+
 strlen(ptr::Ptr{UInt8}) = ccall((:strlen, LIBC), Csize_t, (Ptr{UInt8},), ptr)
 
-function getparams!(ptrs::Vector{Ptr{UInt8}}, params, types, sizes, lengths::Vector{Int32}, nulls)
+function pgdata(t, ptr::Ptr{UInt8}, data)
+    v = pgserialize(t, data)
+    ptr = storestring!(ptr, v)
+end
+
+function getparams!{S<:Signed}(ptrs::Vector{Ptr{UInt8}}, params::Vector, types::Vector{UInt32}, sizes::Vector{S}, lengths, nulls::BitArray)
     fill!(nulls, false)
     for i = 1:length(ptrs)
-        if params[i] === nothing || params[i] === NA || params[i] === Union{}
+        if params[i] == nothing || params[i] === NA || params[i] === Union{}
             nulls[i] = true
         else
-            ptrs[i] = pgdata(types[i], ptrs[i], params[i])
+            ptrs[i] = pgdata(OID{Int(types[i])}, ptrs[i], params[i])
             if sizes[i] < 0
                 warn("Calling strlen--this should be factored out.")
                 lengths[i] = strlen(ptrs[i]) + 1
@@ -172,35 +151,13 @@ function DBI.execute(stmt::PostgresStatementHandle)
     return stmt.result = PostgresResultHandle(result)
 end
 
-pgisnull(v) = v === nothing || v === NA || v === Union{}
-
-function rawvalue{T}(v::T, NULL=nothing)
-    t = pgtype(T)
-
-    if pgisnull(v)
-        NULL
-    else
-        pgdataraw(t, v)
-    end
-end
-
-function rawvalues(values::Vector, NULL=nothing)
-    Any[rawvalue(values[i]) for i = 1:length(values)]
-end
-
-function escaped_rawvalue(v)
-    v == nothing ? "NULL" : escapeliteral(rawvalue(v))
-end
-
-export rawvalue, rawvalues
-
 function DBI.execute(stmt::PostgresStatementHandle, params::Vector)
     nparams = length(params)
 
     if nparams > 0 && isempty(stmt.paramtypes)
-        paramtypes = [pgtype(typeof(p)) for p in params]
+        paramtypes = Oid[convert(Oid, pgtype(typeof(p))) for p in params]
     else
-        paramtypes = stmt.paramtypes
+        paramtypes = Oid[convert(Oid, pgtype(p)) for p in stmt.paramtypes]
     end
 
     if nparams != length(paramtypes)
@@ -212,6 +169,7 @@ function DBI.execute(stmt::PostgresStatementHandle, params::Vector)
     lengths = zeros(Cint, nparams)
     param_ptrs = fill(convert(Ptr{UInt8}, 0), nparams)
     nulls = falses(nparams)
+
     for i = 1:nparams
         if paramtypes[i] === nothing
             paramtypes[i] = pgtype(typeof(params[i]))
@@ -230,8 +188,7 @@ function DBI.execute(stmt::PostgresStatementHandle, params::Vector)
 
     oids = Oid[convert(Oid, oid(p)) for p in paramtypes]
 
-    result = checkerr(PQexecParams(stmt.db.ptr, stmt.stmt, nparams,
-        oids,
+    result = checkerr(PQexecParams(stmt.db.ptr, stmt.stmt, nparams, oids,
         [convert(Ptr{UInt8}, nulls[i] ? C_NULL : param_ptrs[i]) for i = 1:nparams],
         pointer(lengths), pointer(formats), PGF_TEXT))
 
@@ -252,7 +209,7 @@ function executemany{T<:AbstractVector}(stmt::PostgresStatementHandle,
 
     if nparams > 0 && isempty(stmt.paramtypes)
         if isa(params, DataFrame)
-            paramtypes = collect(PostgresType, eltypes(params))
+            paramtypes = collect(pgtype, eltypes(params))
         else
             paramtypes = [pgtype(typeof(p)) for p in params[1]]
         end
@@ -293,8 +250,7 @@ function executemany{T<:AbstractVector}(stmt::PostgresStatementHandle,
             PQclear(result)
         end
 
-        result = checkerr(PQexecParams(stmt.db.ptr, stmt.stmt, nparams,
-            oids,
+        result = checkerr(PQexecParams(stmt.db.ptr, stmt.stmt, nparams, oids,
             [convert(Ptr{UInt8}, nulls[i] ? C_NULL : param_ptrs[i]) for i = 1:nparams],
             pointer(lengths), pointer(formats), PGF_TEXT))
     end
@@ -311,13 +267,13 @@ end
 # Assumes the row exists and has the structure described in PostgresResultHandle
 function unsafe_fetchrow(result::PostgresResultHandle, rownum::Integer)
     return Any[PQgetisnull(result.ptr, rownum, i-1) == 1 ? nothing :
-               jldata(datatype, PQgetvalue(result.ptr, rownum, i-1))
+               pgparse(datatype, PQgetvalue(result.ptr, rownum, i-1))
                for (i, datatype) in enumerate(result.types)]
 end
 
 function unsafe_fetchcol_dataarray(result::PostgresResultHandle, colnum::Integer)
     return @data([PQgetisnull(result.ptr, i, colnum) == 1 ? NA :
-            jldata(result.types[colnum+1], PQgetvalue(result.ptr, i, colnum))
+            pgparse(result.types[colnum+1], PQgetvalue(result.ptr, i, colnum))
             for i = 0:(PQntuples(result.ptr)-1)])
 end
 
@@ -328,7 +284,7 @@ end
 function DBI.fetchdf(result::PostgresResultHandle)
     df = DataFrame()
     for i = 0:(length(result.types)-1)
-        df[symbol(bytestring(PQfname(result.ptr, i)))] = unsafe_fetchcol_dataarray(result, i)
+        df[Symbol(bytestring(PQfname(result.ptr, i)))] = unsafe_fetchcol_dataarray(result, i)
     end
 
     return df
