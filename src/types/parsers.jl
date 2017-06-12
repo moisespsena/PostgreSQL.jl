@@ -1,30 +1,16 @@
 for (pt, t) in (
-    (:array_int4, Int32),
-    (:array_int8, Int64),
-    (:array_float4, Float32),
-    (:array_float8, Float64),
+    (:_int4, Int32),
+    (:_int8, Int64),
+    (:_float4, Float32),
+    (:_float8, Float64),
     )
 
     function pgparse(::oidt(pt), ptr::Ptr{UInt8})
         v = unsafe_string(ptr)[2:end-1]
-        return isempty(v) ? t[] : t[(e == "NULL" ? nothing : 
+        return isempty(v) ? t[] : t[(e == "NULL" ? nothing :
             convert(t, parse($t, e))) for e in split(v, ",")]
     end
 end
-
-#for (pt, t) in (
-#    (:tuple_int4, Int32),
-#    (:tuple_int8, Int64),
-#    (:tuple_float4, Float32),
-#    (:tuple_float8, Float64)
-#    )
-#
-#    function pgparse(::oidt(pt), ptr::Ptr{UInt8})
-#        v = unsafe_string(ptr)[2:end-1]
-#        return isempty(v) ? () : tuple(t[(e == "NULL" ? nothing :
-#            convert(t, parse(t, e))) for e in split(v, ",")]...)
-#    end
-#end
 
 pgparse(::oidt(:date), ptr::Ptr{UInt8}) = Date(unsafe_string(ptr), "yyyy-mm-dd")
 

@@ -122,6 +122,7 @@ end
 
 function getparams!{S<:Signed}(ptrs::Vector{Ptr{UInt8}}, params::Vector, types::Vector{UInt32}, sizes::Vector{S}, lengths, nulls::BitArray)
     fill!(nulls, false)
+    println("-> oids: " * string([Int32(v) for v in types]))
     for i = 1:length(ptrs)
         if params[i] == nothing || params[i] === NA || params[i] === Union{}
             nulls[i] = true

@@ -1,4 +1,4 @@
-export JSONB
+export JSONB, pgtype, oidt, oidt, pgname, jltype, pgoid
 
 type NULL end
 
@@ -12,48 +12,58 @@ type JSONB
     data::Union{Dict,Array}
 end
 
-const OID_BY_PGTYPE = Dict()
-const PGTYPE_BY_OID = Dict()
-const PGTYPE_BY_JLTYPE = Dict()
+
+function pgserialize() end
+function pgparse() end
+function pgname() end
+pgoid(name::Symbol) = pgoid(PostgresType{name})
 
 oid{S<:Signed}(v::S) = OID{v}
-oid{T}(pt::Type{PostgresType{T}}) = OID_BY_PGTYPE[pt]
+oid{T}(pt::Type{PostgresType{T}}) = OID{pgoid(T)}
 oid(tname::Symbol) = oid(PostgresType{tname})
 oid(v::UInt32) = OID{Int(v)}
+oid(v::Vector) = map(oid, v)
 oidt{T}(t::Type{OID{T}}) = Type{t}
 oidt{S<:Signed}(v::S) = oidt(OID{v})
 oidt(v::UInt32) = oidt(OID{Int(v)})
 oidt(tname::Symbol) = oidt(oid(tname))
+pgtype(tname::Symbol) = PostgresType{tname}
+function jltype() end
 
-function pgserialize() end
-function pgparse() end
 
 function newpgtype{T,U}(pt::Type{PostgresType{T}}, oidt::Type{OID{U}})
-    if haskey(OID_BY_PGTYPE, pt)
-        error("overwritten $pt of $(OID_BY_PGTYPE[pt]) to $oidt")
-    end
-
-    OID_BY_PGTYPE[pt] = oidt
-    PGTYPE_BY_OID[oidt] = pt
-
+    @eval pgname(::Type{$oidt}) = next($pt.parameters, 1)[1]
+    @eval pgtype(::Type{$oidt}) = PostgresType{next($pt.parameters, 1)[1]}
+    @eval pgoid(::Type{$pt}) = $U
     oid, pt
 end
 
 newpgtype(tname::Symbol, oid::Signed; kwargs...) =
     newpgtype(PostgresType{tname}, OID{oid}; kwargs...)
 
-function jltyperegister{O}(oid::Type{OID{O}}, t::Type)
-    if !haskey(PGTYPE_BY_JLTYPE, t)
-        PGTYPE_BY_JLTYPE[t] = Any[]
+function jltyperegister{O}(oidt::Type{OID{O}}, t::Type)
+    if ! method_exists(oid, (Type{t},))
+        @eval oid(::Type{$t}) = $oidt
     end
 
-    push!(PGTYPE_BY_JLTYPE[t], oid)
+    if ! method_exists(pgoid, (Type{t},))
+        @eval pgoid(::Type{$t}) = $O
+    end
+
+    if ! method_exists(jltype, (Type{oidt},))
+        @eval jltype(::Type{$oidt}) = $t
+    end
+
+    if ! method_exists(pgtype, (Type{t},))
+        @eval pgtype(t::Type{$t}) = pgtype(oid(t))
+        @eval pgname(t::Type{$t}) = pgname(oid(t))
+    end
+
     t
 end
 
 jltyperegister(tname::Symbol, t::Type) = jltyperegister(oid(tname), t)
 
-pgtype(t::Type) = supertype(t) == AbstractOID ? PGTYPE_BY_OID[t] : PGTYPE_BY_JLTYPE[t][end]
 
 const rjl = jltyperegister
 

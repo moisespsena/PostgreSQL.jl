@@ -36,7 +36,8 @@ function PostgresResultHandle(result::Ptr{PGresult})
     nfields = PQnfields(result)
 
     if status == PGRES_TUPLES_OK || status == PGRES_SINGLE_TUPLE
-        types = DataType[OID{Int(PQftype(result, col))} for col in 0:(nfields-1)]
+        types = DataType[OID{Int(PQftype(result, col))}
+        for col in 0:(nfields-1)]
     else
         types = DataType[]
     end
@@ -54,14 +55,16 @@ type PostgresStatementHandle <: DBI.StatementHandle
     finished::Bool
     result::PostgresResultHandle
 
-    function PostgresStatementHandle(db::PostgresDatabaseHandle, stmt::AbstractString, executed=0, paramtypes::Array{DataType}=DataType[])
+    function PostgresStatementHandle(db::PostgresDatabaseHandle,
+      stmt::AbstractString, executed=0, paramtypes::Array{DataType}=DataType[])
         new(db, stmt, executed, paramtypes, false)
     end
 end
 
 function Base.copy(rh::PostgresResultHandle)
-    PostgresResultHandle(PQcopyResult(result, PG_COPYRES_ATTRS | PG_COPYRES_TUPLES |
-        PG_COPYRES_NOTICEHOOKS | PG_COPYRES_EVENTS), copy(rh.types), rh.ntuples, rh.nfields)
+    PostgresResultHandle(PQcopyResult(result, PG_COPYRES_ATTRS |
+      PG_COPYRES_TUPLES | PG_COPYRES_NOTICEHOOKS | PG_COPYRES_EVENTS),
+      copy(rh.types), rh.ntuples, rh.nfields)
 end
 
 type PostgresException <: Exception
@@ -69,7 +72,8 @@ type PostgresException <: Exception
     msg
 end
 
-PostgresException(db::PostgresDatabaseHandle) = PostgresQueryException(PQstatus(db.ptr), bytestring(PQerrorMessage(db.ptr)))
+PostgresException(db::PostgresDatabaseHandle) =
+    PostgresQueryException(PQstatus(db.ptr), bytestring(PQerrorMessage(db.ptr)))
 
 type PostgresQueryException <: Exception
     status
@@ -83,8 +87,9 @@ function PostgresQueryException(result::Ptr{PGresult})
         bytestring(PQresultErrorMessage(result)))
 end
 
-fields(r::PostgresResultHandle) = tuple(AbstractString[bytestring(PostgreSQL.PQfname(r.ptr, i-1))
-    for i = 1:length(r.types)]...)
+fields(r::PostgresResultHandle) =
+    tuple(AbstractString[bytestring(PostgreSQL.PQfname(r.ptr, i-1))
+        for i = 1:length(r.types)]...)
 
 function escapeliteral(db::PostgresDatabaseHandle, value::AbstractString)
     strptr = PQescapeLiteral(db.ptr, value, sizeof(value))
