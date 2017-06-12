@@ -46,6 +46,43 @@ function test_strings()
     end
 end
 
+function test_arrays()
+    PGType = PostgreSQL.PostgresType
+    v = [Int32(9), Int32(8)]
+    typ = PGType{:_int4}
+    p = PostgreSQL.pgdata(typ, convert(Ptr{UInt8}, C_NULL), v)
+    try
+        data = PostgreSQL.jldata(typ, p)
+        @test typeof(v) == typeof(data)
+        @test v == data
+    finally
+        Libc.free(p)
+    end
+
+    @test PostgreSQL.jldata(:_varchar, "{1,2,3,4,5}") ==
+        Any["1","2","3","4","5"]
+    @test PostgreSQL.jldata(:_varchar, "{{1,2},{3,4},{5}}") ==
+        Any[Any["1","2"],Any["3","4"],Any["5"]]
+    @test PostgreSQL.jldata(:_varchar, "{dfasdf,\"qw,,e{q\\\"we\",'qrer'}") ==
+        Any["dfasdf","\"qw","",Any["q\\\"we\"","'qrer'"]]
+    @test PostgreSQL.jldata(:_varchar, "{,}") == Any["",""]
+    @test PostgreSQL.jldata(:_varchar, "{}") == Any[]
+    @test PostgreSQL.jldata(:_varchar, "") == nothing
+end
+
+function test_tuples()
+    PGType = PostgreSQL.PostgresType
+    v = (Int32(9), Int32(8))
+    typ = PGType{:_int4}
+    p = PostgreSQL.pgdata(typ, convert(Ptr{UInt8}, C_NULL), v)
+    try
+        data = PostgreSQL.jldata(typ, p)
+        @test string(v) == string(tuple(data...))
+    finally
+        Libc.free(p)
+    end
+end
+
 function test_bytea()
     typ = PostgreSQL.PostgresType{:bytea}
     bin = (UInt8)[0x01, 0x03, 0x42, 0xab, 0xff]
@@ -62,7 +99,7 @@ end
 function test_json()
     PGType = PostgreSQL.PostgresType
     for typ in Any[PGType{:json}, PGType{:jsonb}]
-        dict1 = @compat Dict{AbstractString,Any}("bobr dobr" => [1, 2, 3])
+        dict1 = @compat Dict{String,Any}("bobr dobr" => [1, 2, 3])
         p = PostgreSQL.pgdata(typ, convert(Ptr{UInt8}, C_NULL), dict1)
         try
             dict2 = PostgreSQL.jldata(typ, p)
@@ -76,5 +113,7 @@ end
 
 test_numerics()
 test_strings()
+test_arrays()
+test_tuples()
 test_bytea()
 test_json()

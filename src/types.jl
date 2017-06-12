@@ -252,6 +252,15 @@ end
 pgdata(t::Type, ptr::Ptr{UInt8}, data) = pgdata(oid(t), ptr, data)
 
 jldata(t::Type, ptr::Ptr{UInt8}) = pgparse(oid(t), ptr)
+jldata(name::Symbol, ptr::Ptr{UInt8}) = pgparse(oid(name), ptr)
+function jldata(t::Union{Symbol,Type}, v::String)
+    ptr = convert(Ptr{UInt8}, C_NULL)
+    try
+        jldata(t, storestring!(ptr, v))
+    finally
+        Libc.free(ptr)
+    end
+end
 
 function getparams!(ptrs::Vector{Ptr{UInt8}}, params::Vector, types::Vector, sizes::Vector, lengths, nulls::BitArray)
     fill!(nulls, false)

@@ -39,6 +39,8 @@ pgserialize(::oidt(:unknown), v::rjl(:unknown, Any)) = string(v)
 pgserialize(::oidt(:json), v::rjl(:json, Dict{String,Any})) = JSON.json(v)
 pgserialize(::oidt(:jsonb), v::rjl(:jsonb, Dict{String,Any})) = JSON.json(v)
 pgserialize(::oidt(:jsonb), v::rjl(:jsonb, JSONB)) = isa(v.data, String) ? v.data : JSON.json(v.data)
+pgserialize(::oidt(:_varchar), v::rjl(:_varchar, Vector)) =
+    string("ARRAY['" * join(Any[replace(v, "'", "''") for v in data], "', '") * "']")
 
 for stype in PG_STRINGS
     pgserialize(::oidt(stype), v::rjl(oid(stype), String)) = v

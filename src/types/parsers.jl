@@ -69,3 +69,54 @@ pgparse(::oidt(:jsonb), ptr::Ptr{UInt8}) = JSON.parse(unsafe_string(ptr))
 for stype in PG_STRINGS
     pgparse(::oidt(stype), ptr::Ptr{UInt8}) = unsafe_string(ptr)
 end
+
+function pg_array_parse(s, stat, ends, p)
+    if s in (nothing, "")
+        return nothing
+    elseif s[1] != '{'
+        error("Invalid PG_ARRAY value")
+    end
+
+    r = Any[]
+    br = 0
+    str = false
+    qute = nothing
+    v = ""
+    i = stat + 1
+
+    while i <= ends
+        ch = s[i]
+
+        if ch == '}'
+            if !isempty(v) || !isempty(r)
+                push!(r, v)
+            end
+            i += 1
+            break
+        elseif !str && ch == '{'
+            tmp, i = pg_array_parse(s, i, ends, p)
+            push!(r, tmp)
+        elseif ch == ','
+            push!(r, p(v))
+            v = ""
+        elseif str && (ch == '"' ||  ch == '\'')
+            str = true
+            qute = ch
+        elseif !str && ch == qute && s[i-1] == '\\'
+            v = string(v[1:end-1], ch)
+        elseif !str && ch == qute && s[i-1] != '\\'
+            str = false
+        else
+            v = string(v, ch)
+        end
+
+        i += 1
+    end
+    return r, i
+end
+
+pg_array_parse(s, p) = s in (nothing, "") ? nothing : pg_array_parse(s, 1, length(s), p)[1]
+pg_array_parse(s) = pg_array_parse(s, (v) -> v)
+
+PostgreSQL.pgparse(::oidt(:_varchar), ptr::Ptr{UInt8}) = pg_array_parse(unsafe_string(ptr))
+
