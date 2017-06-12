@@ -1,29 +1,3 @@
-#newpgtype(:null, 0)
-#newpgtype(:bool, 16)
-#newpgtype(:bytea, 17)
-#newpgtype(:int8, 20)
-#newpgtype(:int4, 23)
-#newpgtype(:int2, 21)
-#newpgtype(:float4, 700)
-#newpgtype(:float8, 701)
-#newpgtype(:float4, 1021)
-#newpgtype(:float8, 1022)
-#newpgtype(:bpchar, 1042)
-#newpgtype(:varchar, 1043)
-#newpgtype(:text, 25)
-#newpgtype(:numeric, 1700)
-#newpgtype(:date, 1082)
-#newpgtype(:timestamp, 1114)
-#newpgtype(:timestamptz, 1184)
-#newpgtype(:unknown, 705)
-#newpgtype(:json, 114)
-#newpgtype(:jsonb, 3802)
-#newpgtype(:array_int4, 1007)
-#newpgtype(:array_int8, 1016)
-#newpgtype(:array_float4, 1021)
-#newpgtype(:array_float8, 1022)
-#newpgtype(:tuple_int8, 2249)
-
 # Source: https://godoc.org/github.com/lib/pq/oid and
 #         https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_type.h
 # NOTE: all names starts with '_' (underscore) is a array value
@@ -198,6 +172,5 @@ newpgtype(:_regrole, 4097)
 
 
 
-const PG_STRINGS = (:bpchar, :varchar, :text, :date)
-typealias PGStrings Union{oidt(:bpchar),oidt(:varchar),
-                              oidt(:text), oidt(:date)}
+const PG_STRINGS = (:bpchar, :varchar, :text)
+typealias PGStrings Union{oidt(:bpchar),oidt(:varchar), oidt(:text)}

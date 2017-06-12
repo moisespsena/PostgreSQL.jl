@@ -1,4 +1,5 @@
 import Compat: Libc, @compat
+#using DBI
 
 function Base.connect(::Type{Postgres},
                       host::AbstractString="",

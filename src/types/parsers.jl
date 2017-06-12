@@ -8,7 +8,7 @@ for (pt, t) in (
     function pgparse(::oidt(pt), ptr::Ptr{UInt8})
         v = unsafe_string(ptr)[2:end-1]
         return isempty(v) ? t[] : t[(e == "NULL" ? nothing :
-            convert(t, parse($t, e))) for e in split(v, ",")]
+            convert(t, parse(t, e))) for e in split(v, ",")]
     end
 end
 

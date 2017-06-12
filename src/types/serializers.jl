@@ -5,7 +5,8 @@ for (pt, t) in (
     (:_float8, Float64),
     )
 
-    pgserialize(::oidt(pt), v::rjl(pt, Vector{t}))= "{" * join(data, ",") * "}"
+    pgserialize(::oidt(pt), v::rjl(pt, Vector{t}))= "{" * join(v, ",") * "}"
+    pgserialize(::oidt(pt), v::rjl(pt, Tuple{Vararg{t}}))= "(" * join(v, ",") * ")"
 end
 
 
@@ -35,9 +36,9 @@ pgserialize(::oidt(:timestamp), v::rjl(:timestamp, DateTime)) = string(v)
 pgserialize(::oidt(:timestamptz), v::rjl(:timestamptz, TimeZones.ZonedDateTime)) = bytestring(string(v))
 pgserialize(::oidt(:bytea), v::rjl(:bytea, Vector{UInt8})) = string("\\x", bytes2hex(v))
 pgserialize(::oidt(:unknown), v::rjl(:unknown, Any)) = string(v)
-pgserialize(::oidt(:json), v::rjl(:json, Dict{AbstractString,Any})) = bytestring(JSON.json(v))
-pgserialize(::oidt(:jsonb), v::rjl(:jsonb, Dict{AbstractString,Any})) = JSON.json(v)
-pgserialize(::oidt(:jsonb), v::rjl(:jsonb, JSONB)) = JSON.json(v.data)
+pgserialize(::oidt(:json), v::rjl(:json, Dict{String,Any})) = JSON.json(v)
+pgserialize(::oidt(:jsonb), v::rjl(:jsonb, Dict{String,Any})) = JSON.json(v)
+pgserialize(::oidt(:jsonb), v::rjl(:jsonb, JSONB)) = isa(v.data, String) ? v.data : JSON.json(v.data)
 
 for stype in PG_STRINGS
     pgserialize(::oidt(stype), v::rjl(oid(stype), String)) = v

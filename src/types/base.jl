@@ -1,4 +1,4 @@
-export JSONB, pgtype, oidt, oidt, pgname, jltype, pgoid
+export JSONB, @jsonb_str, pgtype, oidt, oidt, pgname, jltype, pgoid
 
 type NULL end
 
@@ -12,6 +12,9 @@ type JSONB
     data::Union{Dict,Array}
 end
 
+macro jsonb_str(s)
+    return JSONB(s)
+end
 
 function pgserialize() end
 function pgparse() end
@@ -30,6 +33,8 @@ oidt(tname::Symbol) = oidt(oid(tname))
 pgtype(tname::Symbol) = PostgresType{tname}
 function jltype() end
 
+# const NULL_VALUES = (nothing, Union{}, NA)
+const NULL_VALUES = (nothing, Union{})
 
 function newpgtype{T,U}(pt::Type{PostgresType{T}}, oidt::Type{OID{U}})
     @eval pgname(::Type{$oidt}) = next($pt.parameters, 1)[1]
