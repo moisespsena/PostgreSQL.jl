@@ -1,25 +1,11 @@
-for (pt, t) in (
-    (:_int4, Int32),
-    (:_int8, Int64),
-    (:_float4, Float32),
-    (:_float8, Float64),
-    )
-
-    pgserialize(::oidt(pt), v::rjl(pt, Vector{t}))= "{" * join(v, ",") * "}"
-    pgserialize(::oidt(pt), v::rjl(pt, Tuple{Vararg{t}}))= "(" * join(v, ",") * ")"
-end
-
-
-#for (pt, t) in (
-#    (:tuple_int4, Int32),
-#    (:tuple_int8, Int64),
-#    (:tuple_float4, Float32),
-#    (:tuple_float8, Float64)
-#    )
-#
-#    pgserialize(::oid(pt), v::rjl(pt, t))= "(" * join(data, ",") * "}"
-#end
-
+pgserialize(::oidt(:_int4), v::rjl(:_int4, Vector{Int32})) = "{" * join(map(string, v), ",") * "}"
+pgserialize(::oidt(:_int4), v::rjl(:_int4, Tuple{Vararg{Int32}}))= "(" * join(v, ",") * ")"
+pgserialize(::oidt(:_int8), v::rjl(:_int8, Vector{Int64})) = "{" * join(map(string, v), ",") * "}"
+pgserialize(::oidt(:_int8), v::rjl(:_int8, Tuple{Vararg{Int64}}))= "(" * join(v, ",") * ")"
+pgserialize(::oidt(:_float4), v::rjl(:_float4, Vector{Float32})) = "{" * join(map(string, v), ",") * "}"
+pgserialize(::oidt(:_float4), v::rjl(:_float4, Tuple{Vararg{Float32}}))= "(" * join(v, ",") * ")"
+pgserialize(::oidt(:_float8), v::rjl(:_float8, Vector{Float64})) = "{" * join(map(string, v), ",") * "}"
+pgserialize(::oidt(:_float8), v::rjl(:_float8, Tuple{Vararg{Float64}}))= "(" * join(v, ",") * ")"
 pgserialize(::oidt(:null), v::rjl(:null, Void)) = "NULL"
 pgserialize(::oidt(:bool), v::rjl(:bool, Bool)) = v ? "TRUE" : "FALSE"
 pgserialize(::oidt(:int8), v::rjl(:int8, Int64)) = string(v)

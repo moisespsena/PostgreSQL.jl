@@ -35,6 +35,7 @@ function jltype() end
 
 # const NULL_VALUES = (nothing, Union{}, NA)
 const NULL_VALUES = (nothing, Union{})
+pgisnull(v) = v == nothing || v == Union{}
 
 function newpgtype{T,U}(pt::Type{PostgresType{T}}, oidt::Type{OID{U}})
     @eval pgname(::Type{$oidt}) = next($pt.parameters, 1)[1]
@@ -46,32 +47,31 @@ end
 newpgtype(tname::Symbol, oid::Signed; kwargs...) =
     newpgtype(PostgresType{tname}, OID{oid}; kwargs...)
 
-function jltyperegister{O}(oidt::Type{OID{O}}, t::Type)
-    if ! method_exists(oid, (Type{t},))
-        @eval oid(::Type{$t}) = $oidt
-    end
+function jltyperegister{O}(oidt::Type{OID{O}}, types::Type...)
+    for t=types
+        if ! method_exists(oid, (Type{t},))
+            @eval oid(::Type{$t}) = $oidt
+        end
 
-    if ! method_exists(pgoid, (Type{t},))
-        @eval pgoid(::Type{$t}) = $O
-    end
+        if ! method_exists(pgoid, (Type{t},))
+            @eval pgoid(::Type{$t}) = $O
+        end
 
-    if ! method_exists(jltype, (Type{oidt},))
-        @eval jltype(::Type{$oidt}) = $t
-    end
+        if ! method_exists(jltype, (Type{oidt},))
+            @eval jltype(::Type{$oidt}) = $t
+        end
 
-    if ! method_exists(pgtype, (Type{t},))
-        @eval pgtype(t::Type{$t}) = pgtype(oid(t))
-        @eval pgname(t::Type{$t}) = pgname(oid(t))
+        if ! method_exists(pgtype, (Type{t},))
+            @eval pgtype(t::Type{$t}) = pgtype(oid(t))
+            @eval pgname(t::Type{$t}) = pgname(oid(t))
+        end
     end
-
-    t
+    types[1]
 end
 
 jltyperegister(tname::Symbol, t::Type) = jltyperegister(oid(tname), t)
 
-
 const rjl = jltyperegister
-
 
 function escape(val)
   if val == nothing return "NULL"
@@ -90,22 +90,18 @@ function escape(val)
   string(val)
 end
 
-pgisnull(v) = v === nothing || v === NA || v === Union{}
+rawvalue{T}(v::T, NULL=nothing) = pgisnull(v) ? NULL : pgserialize(oid(typeof(v)), v)
+rawvalues(values::Vector, null=nothing) = map(v -> rawvalue(v, null), values)
+rawrow(values::Vector; sep="\t", null="NULL", fmt=(_) -> _) =
+    join(
+        map(
+            c -> c == nothing ? null : replace(fmt(c), sep, "\\$sep"),
+            rawvalues(values)
+        ),
+        sep
+    )
 
-
-function rawvalue{T}(v::T, NULL=nothing)
-    if pgisnull(v)
-        NULL
-    else
-        pgserialize(pgtype(T), v)
-    end
-end
-
-function rawvalues(values::Vector, NULL=nothing)
-    Any[rawvalue(values[i]) for i = 1:length(values)]
-end
-
-export rawvalue, rawvalues
+export rawvalue, rawvalues, rawrow
 
 function storestring!(ptr::Ptr{UInt8}, str::String)
     ptr = convert(Ptr{UInt8}, Libc.realloc(ptr, sizeof(str)+1))

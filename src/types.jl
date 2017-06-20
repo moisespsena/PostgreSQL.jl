@@ -2,6 +2,7 @@
 import JSON
 import Compat: Libc, unsafe_convert, parse, @compat
 import TimeZones
+const EOF = -1
 
 include("types/base.jl")
 
@@ -71,7 +72,7 @@ type PostgresException <: Exception
 end
 
 PostgresException(db::PostgresDatabaseHandle) =
-    PostgresQueryException(PQstatus(db.ptr), bytestring(PQerrorMessage(db.ptr)))
+    PostgresException(PQstatus(db.ptr), bytestring(PQerrorMessage(db.ptr)))
 
 type PostgresQueryException <: Exception
     status
@@ -284,16 +285,14 @@ function cleanupparams(ptrs::Vector{Ptr{UInt8}})
     end
 end
 
-export prepare, execute, executemany, finish
+export prepare, execute, executemany, finish, executeonly
 
 prepare(db::PostgresDatabaseHandle, sql::AbstractString) = PostgresStatementHandle(db, sql)
 
 finish(stmt::PostgresStatementHandle) = nothing
 
-function execute(stmt::PostgresStatementHandle)
-    result = checkerr(PQexec(stmt.db.ptr, stmt.stmt))
-    return stmt.result = PostgresResultHandle(result)
-end
+execute(stmt::PostgresStatementHandle) =
+    stmt.result = PostgresResultHandle(checkerr(PQexec(stmt.db.ptr, stmt.stmt)))
 
 function execute(stmt::PostgresStatementHandle, params::Vector)
     nparams = length(params)
@@ -334,7 +333,7 @@ function execute(stmt::PostgresStatementHandle, params::Vector)
 
     cleanupparams(param_ptrs)
 
-    return stmt.result = PostgresResultHandle(result)
+    stmt.result = PostgresResultHandle(result)
 end
 
 execute(db::PostgresDatabaseHandle, sql::AbstractString) =
@@ -342,6 +341,9 @@ execute(db::PostgresDatabaseHandle, sql::AbstractString) =
 
 execute(db::PostgresDatabaseHandle, sql::AbstractString, params::Vector) =
     execute(prepare(db, sql), params)
+
+executeonly(args...) = PQclear(execute(args...).ptr)
+
 
 function executemany{T<:AbstractVector}(stmt::PostgresStatementHandle,
         params::Union{AbstractVector{T}})
@@ -403,24 +405,10 @@ function unsafe_fetchrow(result::PostgresResultHandle, rownum::Integer)
                for (i, datatype) in enumerate(result.types)]
 end
 
-#function unsafe_fetchcol_dataarray(result::PostgresResultHandle, colnum::Integer)
-#    return @data([PQgetisnull(result.ptr, i, colnum) == 1 ? NA :
-#            pgparse(result.types[colnum+1], PQgetvalue(result.ptr, i, colnum))
-#            for i = 0:(PQntuples(result.ptr)-1)])
-#end
 
 function fetchall(result::PostgresResultHandle)
     return Vector{Any}[row for row in result]
 end
-
-#function fetchdf(result::PostgresResultHandle)
-#    df = DataFrame()
-#    for i = 0:(length(result.types)-1)
-#        df[Symbol(bytestring(PQfname(result.ptr, i)))] = unsafe_fetchcol_dataarray(result, i)
-#    end
-#
-#    return df
-#end
 
 function Base.next(result::PostgresResultHandle)
     if result.state == -1
@@ -465,84 +453,126 @@ function array(result::PostgresResultHandle)
     return rows
 end
 
-function on_start()
+function onstart()
 end
 
-export array
+type Importer
+    db::PostgresDatabaseHandle
+    totable::String
+    columns::Tuple{String, Vararg{String}}
+    sep::String
+    null::String
+    options::Dict{Symbol, String}
+    onstart::Union{Void, Function}
+    sql::Union{Void, String}
+    done::Union{Void, Bool}
+    _result::Union{Void, Ptr{PGresult}}
+    line::Int
+    _write::Union{Void, Function}
 
-# MOISESPSENA
-function import_rows(db::PostgresDatabaseHandle, totable::AbstractString,
-    columns::Tuple{AbstractString, Vararg{AbstractString}}, ds, delimiter="|"; NULL="~",
-    valuefmt=(v) -> v, pre_callback=Union{Void,Function}, options...)
-    push!(options, (:NULL, NULL))
-    push!(options, (:DELIMITER, delimiter))
-    options = join(map((v) -> "$(v[1]) $(repr(v[2]))", options),", ")
+    Importer(db, totable, columns, sep, null, options, onstart=nothing) =
+         new(db, totable, columns, sep, null, options, onstart, nothing, nothing, nothing, 0, nothing)
+end
 
-    if method_exists(Base.start, (typeof(ds),)) && method_exists(on_start, (typeof(ds),))
-        on_start(ds)
-    end
+Importer(db, totable, columns;sep="|",null="~",
+    options::Dict{Symbol,String}=Dict{Symbol,String}(), onstart=nothing) =
+    Importer(db, totable, columns, sep, null, options, onstart)
 
-    copysql = "COPY $totable(" * join(columns, ", ") * ") " *
+function Base.open(imp::Importer)
+    options = merge!(Dict(), imp.options)
+    options[:NULL] = imp.null
+    options[:DELIMITER] = imp.sep
+    options = join(map(kv -> "$(kv.first) $(repr(kv.second))", collect(options)),", ")
+    imp.sql = "COPY $(imp.totable)(" * join(imp.columns, ", ") * ") " *
         "FROM STDIN WITH ($options)"
+    imp._result = checkerr(PQexec(imp.db.ptr, imp.sql))
+    imp.done = false
+    imp.line = 0
+    imp._write = imp_first_write
+end
 
-    function format(v::Vector)
-        join([if _ == nothing NULL
-              else replace(valuefmt(_), delimiter, "\\$delimiter") end
-              for _ in rawvalues(v)],
-            delimiter)
+function Base.open(fn::Function, imp::Importer)
+    open(imp)
+    try
+        fn(imp)
+    finally
+        close(imp)
+    end
+end
+
+function imp_write(imp::Importer, data::String)
+    s = sizeof(data)
+
+    if PQputCopyData(imp.db.ptr, data, s) != 1
+        throw(PostgresException(imp.db))
     end
 
-    format(v::AbstractString) = valuefmt(v)
-
-    _pqerr() = throw(PostgresException(db))
-
-    function _send(data)
-        data = format(data)
-
-        if PQputCopyData(db.ptr, data, sizeof(data)) != 1
-            _pqerr()
-        end
-
-        if PQputCopyData(db.ptr, "\n", 1) != 1
-            _pqerr()
-        end
+    if PQputCopyData(imp.db.ptr, "\n", 1) != 1
+        throw(PostgresException(imp.db))
     end
 
-    result = checkerr(PQexec(db.ptr, copysql))
+    imp.line += 1
+    imp.line, s + 1
+end
 
-    i = 0
 
-    if method_exists(Base.start, (typeof(ds),))
-        for data in ds
-            _send(data)
-            i += 1
-        end
-    else
-        while true
-            data = datacb()
-            if data == nothing
-                break
-            end
-            _send(data)
-            i += 1
-        end
+function imp_first_write(imp::Importer, data::String)
+    if imp.onstart != nothing
+        imp.onstart(imp)
+    end
+    imp._write = imp_write
+    imp_write(imp, data)
+end
+
+Base.write(imp::Importer, data::String) = imp._write(imp, data)
+
+Base.write(imp::Importer, values::Vector) =
+    Base.write(imp, rawrow(values; sep=imp.sep,null=imp.null))
+
+type ImporterIterator
+    it
+end
+
+export Importer, ImporterIterator
+
+function Base.write(imp::Importer, it::ImporterIterator)
+    if method_exists(onstart, (typeof(it.it),))
+        onstart(it.it)
     end
 
-    if PQputCopyEnd(db.ptr, C_NULL) != 1
-        _pqerr()
+    for data in it.it
+        write(imp, data)
+    end
+end
+
+function Base.write(imp::Importer, reader::Function)
+    data = datacb()
+    if data === nothing
+        return EOF, 0
+    end
+    write(imp, data)
+end
+
+function Base.close(imp::Importer)
+    imp.done = true
+    if PQputCopyEnd(imp.db.ptr, C_NULL) != 1
+        throw(PostgresException(imp.db))
+    end
+
+    PQclear(imp._result)
+    imp._result = nothing
+
+    result = PQgetResult(imp.db.ptr)
+
+    if PQresultStatus(result) != PGRES_COMMAND_OK
+        PQclear(result)
+        throw(PostgresException(imp.db))
     end
 
     PQclear(result)
-
-    result = PQgetResult(db.ptr)
-
-    if PGRES_COMMAND_OK != PQresultStatus(result)
-        PQclear(result)
-        _pqerr()
-    end
 end
 
-export import_rows
+export array
 
 function transaction(cb::Function, db::PostgresDatabaseHandle)
     run(db, "BEGIN")
